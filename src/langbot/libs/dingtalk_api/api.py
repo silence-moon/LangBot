@@ -415,12 +415,10 @@ class DingTalkClient:
             'Content-Type': 'application/json',
         }
 
-        card_biz_id = f'card_{target_id}_{int(time.time() * 1000)}'
-
+        # 不再预生成 card_biz_id，改为使用钉钉返回的真实 ID
         body = {
             'cardTemplateId': card_template_id,
             'robotCode': self.robot_code,
-            'cardBizId': card_biz_id,
             'cardData': json.dumps({'content': content, 'title': 'AI Thinking...'}),
         }
 
@@ -436,6 +434,9 @@ class DingTalkClient:
             if response.status_code != 200 or not result.get('success'):
                 error_msg = result.get('message', 'Unknown error')
                 raise Exception(f'Failed to send proactive card: {error_msg}')
+
+            # 使用钉钉返回的真实 cardBizId
+            card_biz_id = result.get('cardBizId', '')
 
         return {'card_biz_id': card_biz_id, 'card_template_id': card_template_id}
 
