@@ -423,13 +423,7 @@ class DingTalkClient:
             'Content-Type': 'application/json',
         }
 
-        # 添加 flowStatus 字段，这是 AI 卡片流式更新必需的
-        # flowStatus: 1=处理中, 2=输入中, 3=完成, 4=执行中, 5=失败
-        card_data = {
-            'content': content,
-            'title': 'AI Thinking...',
-            'flowStatus': 1,  # PROCESSING - 处理中状态
-        }
+        card_data = {'content': content, 'title': 'AI Thinking...'}
 
         body = {
             'cardTemplateId': card_template_id,
@@ -481,7 +475,9 @@ class DingTalkClient:
     ) -> None:
         """Update proactive card via streaming API.
 
-        Uses SDK's streaming update method with outTrackId.
+        AI 卡片流式更新需要两步：
+        1. 先调用 PUT /v1.0/card/instances 设置 flowStatus 状态
+        2. 再调用 PUT /v1.0/card/streaming 更新内容
 
         Args:
             out_track_id: The card instance ID from send_proactive_card (outTrackId)
@@ -492,7 +488,6 @@ class DingTalkClient:
         if not await self.check_access_token():
             await self.get_access_token()
 
-        # 使用 SDK 的流式更新 API
         import uuid
 
         headers = {
@@ -500,42 +495,57 @@ class DingTalkClient:
             'Content-Type': 'application/json',
         }
 
-        body = {
-            'outTrackId': out_track_id,
-            'guid': str(uuid.uuid1()),
-            'key': 'content',
-            'content': content,
-            'isFull': True,  # 每次更新都替换全部内容
-            'isFinalize': is_final,
-            'isError': False,
-        }
-
-        # 添加 flowStatus 状态
-        # flowStatus: 1=处理中, 2=输入中(推荐用于流式更新), 3=完成, 4=执行中, 5=失败
-        if is_final:
-            body['flowStatus'] = 3  # FINISHED - 完成状态
-        else:
-            body['flowStatus'] = 2  # INPUTING - 输入中状态
-
         # DEBUG: 打印更新请求
         if self.logger:
             await self.logger.info(
                 f'[DingTalk] update_proactive_card: out_track_id={out_track_id}, content={content[:50] if len(content) > 50 else content}..., is_final={is_final}'
             )
 
-        # 使用 SDK 的流式更新端点
-        url = 'https://api.dingtalk.com/v1.0/card/streaming'
+        # Step 1: 先更新 flowStatus 状态
+        # INPUTING(2) 用于流式更新中, FINISHED(3) 用于完成
+        flow_status = 3 if is_final else 2  # 3=FINISHED, 2=INPUTING
+
+        status_body = {
+            'outTrackId': out_track_id,
+            'cardData': {
+                'cardParamMap': {
+                    'flowStatus': flow_status,
+                }
+            },
+        }
+
+        status_url = 'https://api.dingtalk.com/v1.0/card/instances'
         async with httpx.AsyncClient() as client:
-            response = await client.put(url, headers=headers, json=body)
+            status_response = await client.put(status_url, headers=headers, json=status_body)
+            if self.logger:
+                await self.logger.info(
+                    f'[DingTalk] update_proactive_card status: status={status_response.status_code}, body={status_response.text}'
+                )
+
+        # Step 2: 调用流式更新接口更新内容
+        # 注意: key 需要与卡片模板中的变量名一致，通常是 'content' 或 'msgContent'
+        streaming_body = {
+            'outTrackId': out_track_id,
+            'guid': str(uuid.uuid1()),
+            'key': 'content',  # 卡片模板中的变量名
+            'content': content,
+            'isFull': True,
+            'isFinalize': is_final,
+            'isError': False,
+        }
+
+        streaming_url = 'https://api.dingtalk.com/v1.0/card/streaming'
+        async with httpx.AsyncClient() as client:
+            streaming_response = await client.put(streaming_url, headers=headers, json=streaming_body)
 
             # DEBUG: 打印钉钉响应
             if self.logger:
                 await self.logger.info(
-                    f'[DingTalk] update_proactive_card response: status={response.status_code}, body={response.text}'
+                    f'[DingTalk] update_proactive_card streaming: status={streaming_response.status_code}, body={streaming_response.text}'
                 )
 
-            if response.status_code != 200:
-                result = response.json()
+            if streaming_response.status_code != 200:
+                result = streaming_response.json()
                 error_msg = result.get('message', 'Unknown error')
                 if self.logger:
                     await self.logger.error(f'Failed to update card: {error_msg}')
