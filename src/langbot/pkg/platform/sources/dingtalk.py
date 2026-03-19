@@ -295,6 +295,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
 
             self._proactive_card_cache[message_id] = {
                 'card_biz_id': result['card_biz_id'],
+                'card_template_id': result['card_template_id'],
                 'last_content': content,
             }
 
@@ -339,6 +340,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
         try:
             await self.bot.update_proactive_card(
                 card_biz_id=card_info['card_biz_id'],
+                card_template_id=card_info['card_template_id'],
                 content=content,
                 is_final=is_final,
             )

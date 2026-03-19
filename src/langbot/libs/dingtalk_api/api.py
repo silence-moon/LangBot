@@ -437,11 +437,12 @@ class DingTalkClient:
                 error_msg = result.get('message', 'Unknown error')
                 raise Exception(f'Failed to send proactive card: {error_msg}')
 
-        return {'card_biz_id': card_biz_id}
+        return {'card_biz_id': card_biz_id, 'card_template_id': card_template_id}
 
     async def update_proactive_card(
         self,
         card_biz_id: str,
+        card_template_id: str,
         content: str,
         is_final: bool = False,
     ) -> None:
@@ -462,6 +463,7 @@ class DingTalkClient:
         }
 
         body = {
+            'cardTemplateId': card_template_id,
             'robotCode': self.robot_code,
             'cardBizId': card_biz_id,
             'cardData': json.dumps({'content': content, 'title': 'AI Response' if is_final else 'AI Thinking...'}),
