@@ -777,7 +777,7 @@ class LarkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
 
     quart_app: quart.Quart = pydantic.Field(exclude=True)
 
-    card_id_dict: dict[str, str]  # 消息id到卡片id的映射，便于创建卡片后的发送消息到指定卡片
+    card_id_dict: dict[str, dict]  # 消息id到卡片信息的映射，便于创建卡片后的发送消息到指定卡片
 
     seq: int  # 用于在发送卡片消息中识别消息顺序，直接以seq作为标识
     bot_uuid: str = None  # 机器人UUID
@@ -945,13 +945,224 @@ class LarkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
         return api_client
 
     async def send_message(self, target_type: str, target_id: str, message: platform_message.MessageChain):
-        pass
+        text_elements, media_items = await LarkMessageConverter.yiri2target(message, self.api_client)
+
+        if target_type == 'person':
+            receive_id_type = 'open_id'
+        elif target_type == 'group':
+            receive_id_type = 'chat_id'
+        else:
+            receive_id_type = 'open_id'
+
+        if text_elements:
+            content = {'zh_Hans': {'title': '', 'content': text_elements}}
+            request: CreateMessageRequest = (
+                CreateMessageRequest.builder()
+                .receive_id_type(receive_id_type)
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(target_id)
+                    .content(json.dumps(content))
+                    .msg_type('post')
+                    .uuid(str(uuid.uuid4()))
+                    .build()
+                )
+                .build()
+            )
+            if 'isv' == self.config.get('app_type', 'self') and receive_id_type == 'chat_id':
+                message_event = message[0].source if message and hasattr(message[0], 'source') else None
+                if message_event and hasattr(message_event, 'message'):
+                    tenant_key = getattr(message_event, 'tenant_key', None) or self.lark_tenant_key
+                else:
+                    tenant_key = self.lark_tenant_key
+                app_access_token = self.get_app_access_token()
+                tenant_access_token = self.get_tenant_access_token(tenant_key) if tenant_key else None
+                req_opt: RequestOption = (
+                    RequestOption.builder()
+                    .app_ticket(self.app_ticket)
+                    .tenant_key(tenant_key)
+                    .app_access_token(app_access_token)
+                    .tenant_access_token(tenant_access_token)
+                    .build()
+                )
+                response: CreateMessageResponse = self.api_client.im.v1.message.create(request, req_opt)
+            else:
+                response: CreateMessageResponse = await self.api_client.im.v1.message.acreate(request)
+
+            if not response.success():
+                raise Exception(
+                    f'client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}'
+                )
+
+        for media_item in media_items:
+            msg_type = media_item['msg_type']
+            content = json.dumps(media_item['content'])
+
+            request: CreateMessageRequest = (
+                CreateMessageRequest.builder()
+                .receive_id_type(receive_id_type)
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(target_id)
+                    .content(content)
+                    .msg_type(msg_type)
+                    .uuid(str(uuid.uuid4()))
+                    .build()
+                )
+                .build()
+            )
+            if 'isv' == self.config.get('app_type', 'self') and receive_id_type == 'chat_id':
+                message_event = message[0].source if message and hasattr(message[0], 'source') else None
+                if message_event and hasattr(message_event, 'message'):
+                    tenant_key = getattr(message_event, 'tenant_key', None) or self.lark_tenant_key
+                else:
+                    tenant_key = self.lark_tenant_key
+                app_access_token = self.get_app_access_token()
+                tenant_access_token = self.get_tenant_access_token(tenant_key) if tenant_key else None
+                req_opt: RequestOption = (
+                    RequestOption.builder()
+                    .app_ticket(self.app_ticket)
+                    .tenant_key(tenant_key)
+                    .app_access_token(app_access_token)
+                    .tenant_access_token(tenant_access_token)
+                    .build()
+                )
+                response: CreateMessageResponse = self.api_client.im.v1.message.create(request, req_opt)
+            else:
+                response: CreateMessageResponse = await self.api_client.im.v1.message.acreate(request)
+
+            if not response.success():
+                raise Exception(
+                    f'client.im.v1.message.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}'
+                )
 
     async def is_stream_output_supported(self) -> bool:
         is_stream = False
         if self.config.get('enable-stream-reply', None):
             is_stream = True
         return is_stream
+
+    async def send_card_message(
+        self,
+        target_type: str,
+        target_id: str,
+        content: str = 'Thinking...',
+        streaming: bool = True,
+    ) -> dict:
+        """
+        Send a card message to a specific target (proactive sending, not reply).
+
+        Args:
+            target_type: Target type, 'person' or 'group'
+            target_id: Target ID (open_id for person, chat_id for group)
+            content: Initial content to display in the card
+            streaming: Whether the card supports streaming updates
+
+        Returns:
+            dict with 'message_id' and 'card_id' for subsequent updates
+        """
+        message_id = str(uuid.uuid4())
+
+        card_id = await self.create_card_id(message_id)
+
+        receive_id_type = 'open_id' if target_type == 'person' else 'chat_id'
+
+        card_content = {
+            'type': 'card',
+            'data': {'card_id': card_id, 'template_variable': {'content': content}},
+        }
+
+        request: CreateMessageRequest = (
+            CreateMessageRequest.builder()
+            .receive_id_type(receive_id_type)
+            .request_body(
+                CreateMessageRequestBody.builder()
+                .receive_id(target_id)
+                .content(json.dumps(card_content))
+                .msg_type('interactive')
+                .uuid(message_id)
+                .build()
+            )
+            .build()
+        )
+
+        tenant_key = self.lark_tenant_key
+        if 'isv' == self.config.get('app_type', 'self'):
+            app_access_token = self.get_app_access_token()
+            tenant_access_token = self.get_tenant_access_token(tenant_key) if tenant_key else None
+            req_opt: RequestOption = (
+                RequestOption.builder()
+                .app_ticket(self.app_ticket)
+                .tenant_key(tenant_key)
+                .app_access_token(app_access_token)
+                .tenant_access_token(tenant_access_token)
+                .build()
+            )
+            response: CreateMessageResponse = self.api_client.im.v1.message.create(request, req_opt)
+        else:
+            response: CreateMessageResponse = await self.api_client.im.v1.message.acreate(request)
+
+        if not response.success():
+            raise Exception(
+                f'client.im.v1.message.create (card) failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}'
+            )
+
+        self.card_id_dict[message_id] = {'card_id': card_id, 'seq': 1}
+
+        return {
+            'message_id': message_id,
+            'card_id': card_id,
+            'lark_message_id': response.data.message_id if response.data else None,
+        }
+
+    async def update_card_message(self, message_id: str, content: str, is_final: bool = False) -> None:
+        """
+        Update the content of a card message (for streaming updates).
+
+        Args:
+            message_id: The message_id returned from send_card_message
+            content: The content to update
+            is_final: Whether this is the final update
+        """
+        if message_id not in self.card_id_dict:
+            raise Exception(f'Card message not found: {message_id}')
+
+        card_info = self.card_id_dict[message_id]
+        card_id = card_info['card_id']
+        seq = card_info['seq']
+        card_info['seq'] = seq + 1
+
+        request: ContentCardElementRequest = (
+            ContentCardElementRequest.builder()
+            .card_id(card_id)
+            .element_id('streaming_txt')
+            .request_body(ContentCardElementRequestBody.builder().content(content).sequence(seq).build())
+            .build()
+        )
+
+        if is_final:
+            self.card_id_dict.pop(message_id)
+
+        tenant_key = self.lark_tenant_key
+        if 'isv' == self.config.get('app_type', 'self'):
+            app_access_token = self.get_app_access_token()
+            tenant_access_token = self.get_tenant_access_token(tenant_key) if tenant_key else None
+            req_opt: RequestOption = (
+                RequestOption.builder()
+                .app_ticket(self.app_ticket)
+                .tenant_key(tenant_key)
+                .app_access_token(app_access_token)
+                .tenant_access_token(tenant_access_token)
+                .build()
+            )
+            response: ContentCardElementResponse = self.api_client.cardkit.v1.card_element.content(request, req_opt)
+        else:
+            response: ContentCardElementResponse = self.api_client.cardkit.v1.card_element.content(request)
+
+        if not response.success():
+            raise Exception(
+                f'card_element.content failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}'
+            )
 
     async def create_card_id(self, message_id):
         try:
@@ -1143,7 +1354,7 @@ class LarkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
                     f'client.cardkit.v1.card.create failed, code: {response.code}, msg: {response.msg}, log_id: {response.get_log_id()}, resp: \n{json.dumps(json.loads(response.raw.content), indent=4, ensure_ascii=False)}'
                 )
 
-            self.card_id_dict[message_id] = response.data.card_id
+            self.card_id_dict[message_id] = {'card_id': response.data.card_id, 'seq': 1}
 
             card_id = response.data.card_id
             return card_id
@@ -1334,7 +1545,7 @@ class LarkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
 
             request: ContentCardElementRequest = (
                 ContentCardElementRequest.builder()
-                .card_id(self.card_id_dict[message_id])
+                .card_id(self.card_id_dict[message_id]['card_id'])
                 .element_id('streaming_txt')
                 .request_body(
                     ContentCardElementRequestBody.builder()
