@@ -423,7 +423,13 @@ class DingTalkClient:
             'Content-Type': 'application/json',
         }
 
-        card_data = {'content': content, 'title': 'AI Thinking...'}
+        # 添加 flowStatus 字段，这是 AI 卡片流式更新必需的
+        # flowStatus: 1=处理中, 2=输入中, 3=完成, 4=执行中, 5=失败
+        card_data = {
+            'content': content,
+            'title': 'AI Thinking...',
+            'flowStatus': 1,  # PROCESSING - 处理中状态
+        }
 
         body = {
             'cardTemplateId': card_template_id,
@@ -503,6 +509,13 @@ class DingTalkClient:
             'isFinalize': is_final,
             'isError': False,
         }
+
+        # 添加 flowStatus 状态
+        # flowStatus: 1=处理中, 2=输入中(推荐用于流式更新), 3=完成, 4=执行中, 5=失败
+        if is_final:
+            body['flowStatus'] = 3  # FINISHED - 完成状态
+        else:
+            body['flowStatus'] = 2  # INPUTING - 输入中状态
 
         # DEBUG: 打印更新请求
         if self.logger:
