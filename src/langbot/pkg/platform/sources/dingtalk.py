@@ -299,6 +299,11 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
                 'last_content': content,
             }
 
+            # DEBUG: 打印缓存状态
+            await self.logger.info(
+                f'[DingTalk Adapter] send_card_message: message_id={message_id}, card_biz_id={result["card_biz_id"]}, cache_size={len(self._proactive_card_cache)}'
+            )
+
             return {
                 'message_id': message_id,
                 'card_id': message_id,
@@ -326,13 +331,27 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
             content: The content to update
             is_final: Whether this is the final update
         """
-        if not hasattr(self, '_proactive_card_cache') or message_id not in self._proactive_card_cache:
+        # DEBUG: 打印调用状态
+        await self.logger.info(f'[DingTalk Adapter] update_card_message: message_id={message_id}, is_final={is_final}')
+
+        if not hasattr(self, '_proactive_card_cache'):
+            await self.logger.error(f'[DingTalk Adapter] update_card_message: _proactive_card_cache not found!')
+            return
+
+        if message_id not in self._proactive_card_cache:
+            await self.logger.error(
+                f'[DingTalk Adapter] update_card_message: message_id={message_id} not in cache. cache_keys={list(self._proactive_card_cache.keys())}'
+            )
             return
 
         card_info = self._proactive_card_cache[message_id]
+        await self.logger.info(
+            f'[DingTalk Adapter] update_card_message: found card_info, card_biz_id={card_info.get("card_biz_id")}'
+        )
 
         # Skip if content unchanged
         if content == card_info['last_content'] and not is_final:
+            await self.logger.info(f'[DingTalk Adapter] update_card_message: content unchanged, skipping')
             return
 
         card_info['last_content'] = content
@@ -344,6 +363,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
                 content=content,
                 is_final=is_final,
             )
+            await self.logger.info(f'[DingTalk Adapter] update_card_message: update_proactive_card called successfully')
         except Exception as e:
             await self.logger.error(f'Failed to update card: {e}')
 

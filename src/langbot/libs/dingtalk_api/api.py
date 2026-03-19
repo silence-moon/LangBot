@@ -431,12 +431,20 @@ class DingTalkClient:
             response = await client.post(url, headers=headers, json=body)
             result = response.json()
 
+            # DEBUG: 打印钉钉响应
+            if self.logger:
+                await self.logger.info(
+                    f'[DingTalk] send_proactive_card response: status={response.status_code}, result={result}'
+                )
+
             if response.status_code != 200 or not result.get('success'):
                 error_msg = result.get('message', 'Unknown error')
                 raise Exception(f'Failed to send proactive card: {error_msg}')
 
             # 使用钉钉返回的真实 cardBizId
             card_biz_id = result.get('cardBizId', '')
+            if self.logger:
+                await self.logger.info(f'[DingTalk] send_proactive_card: card_biz_id={card_biz_id}')
 
         return {'card_biz_id': card_biz_id, 'card_template_id': card_template_id}
 
@@ -473,8 +481,21 @@ class DingTalkClient:
         if is_final:
             body['finished'] = True
 
+        # DEBUG: 打印更新请求
+        if self.logger:
+            await self.logger.info(
+                f'[DingTalk] update_proactive_card: card_biz_id={card_biz_id}, card_template_id={card_template_id}, content={content[:50] if len(content) > 50 else content}..., is_final={is_final}'
+            )
+
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json=body)
+
+            # DEBUG: 打印钉钉响应
+            if self.logger:
+                await self.logger.info(
+                    f'[DingTalk] update_proactive_card response: status={response.status_code}, body={response.text}'
+                )
+
             if response.status_code != 200:
                 result = response.json()
                 error_msg = result.get('message', 'Unknown error')
