@@ -231,12 +231,73 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
         card_template_id = self.config['card_template_id']
         incoming_message = event.source_platform_object.incoming_message
         # message_id = incoming_message.message_id
-        card_auto_layout = self.config.get('card_ auto_layout', False)
+        card_auto_layout = self.config.get('card_auto_layout', False)
         card_instance, card_instance_id = await self.bot.create_and_card(
             card_template_id, incoming_message, card_auto_layout=card_auto_layout
         )
         self.card_instance_id_dict[message_id] = (card_instance, card_instance_id)
         return True
+
+    async def send_card_message(
+        self,
+        target_type: str,
+        target_id: str,
+        content: str = 'Thinking...',
+        streaming: bool = True,
+    ) -> dict:
+        """
+        Send a card message to a specific target (proactive sending, not reply).
+
+        Args:
+            target_type: Target type, 'person' or 'group'
+            target_id: Target ID (user_id for person, openConversationId for group)
+            content: Initial content to display in the card
+            streaming: Whether the card supports streaming updates (currently only for reply context)
+
+        Returns:
+            dict with 'message_id' for tracking (DingTalk uses text messages for proactive card-like content)
+
+        Note:
+            DingTalk's proactive card message API differs from reply context.
+            We send a markdown-formatted text message that serves as a card.
+            For full streaming card support, use within reply context.
+        """
+        import uuid
+
+        message_id = str(uuid.uuid4())
+
+        # DingTalk proactive messages use text/markdown format
+        # For now, we send a markdown message that looks like a card
+        # Full streaming cards are only supported in reply context
+        if target_type == 'person':
+            await self.bot.send_proactive_message_to_one(target_id, content)
+        elif target_type == 'group':
+            await self.bot.send_proactive_message_to_group(target_id, content)
+
+        return {
+            'message_id': message_id,
+            'card_id': message_id,  # DingTalk doesn't have card_id in proactive mode
+            'lark_message_id': None,  # Not applicable for DingTalk
+        }
+
+    async def update_card_message(self, message_id: str, content: str, is_final: bool = False) -> None:
+        """
+        Update the content of a card message.
+
+        Args:
+            message_id: The message_id returned from send_card_message
+            content: The content to update
+            is_final: Whether this is the final update
+
+        Note:
+            DingTalk proactive messages don't support true updates.
+            This method sends a new message with the updated content.
+            For streaming updates, use within reply context.
+        """
+        # DingTalk proactive messages cannot be updated
+        # This method is a no-op for proactive messages
+        # Streaming updates are only supported in reply context via card_instance
+        pass
 
     def register_listener(
         self,

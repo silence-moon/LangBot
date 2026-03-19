@@ -197,3 +197,75 @@ class BotService:
 
         # Send message via adapter
         await runtime_bot.adapter.send_message(target_type, str(target_id), message_chain)
+
+    async def send_card_message(
+        self,
+        bot_uuid: str,
+        target_type: str,
+        target_id: str,
+        content: str,
+        streaming: bool = True,
+    ) -> dict:
+        """Send a card message to a specific target via bot (proactive sending, not reply)
+
+        This method creates and sends an interactive card message to DingTalk or Lark.
+        Supports streaming updates for dynamic content.
+
+        Args:
+            bot_uuid: The UUID of the bot
+            target_type: The type of the target, can be "person" or "group"
+            target_id: The ID of the target (open_id for person, chat_id for group in Lark;
+                      staff_id or conversation_id for DingTalk)
+            content: Initial content to display in the card
+            streaming: Whether the card supports streaming updates
+
+        Returns:
+            dict with 'message_id' and 'card_id' for subsequent updates
+
+        Raises:
+            Exception: If bot not found, or adapter doesn't support card messages
+        """
+        # Get runtime bot
+        runtime_bot = await self.ap.platform_mgr.get_bot_by_uuid(bot_uuid)
+        if runtime_bot is None:
+            raise Exception(f'Bot not found: {bot_uuid}')
+
+        # Check if adapter supports card messages
+        adapter = runtime_bot.adapter
+        if not hasattr(adapter, 'send_card_message'):
+            raise Exception(f'Bot adapter {adapter.__class__.__name__} does not support card messages')
+
+        # Send card message via adapter
+        result = await adapter.send_card_message(target_type, target_id, content, streaming)
+        return result
+
+    async def update_card_message(
+        self,
+        bot_uuid: str,
+        message_id: str,
+        content: str,
+        is_final: bool = False,
+    ) -> None:
+        """Update the content of a card message (for streaming updates)
+
+        Args:
+            bot_uuid: The UUID of the bot
+            message_id: The message_id returned from send_card_message
+            content: The content to update in the card
+            is_final: Whether this is the final update
+
+        Raises:
+            Exception: If bot not found, or adapter doesn't support card updates
+        """
+        # Get runtime bot
+        runtime_bot = await self.ap.platform_mgr.get_bot_by_uuid(bot_uuid)
+        if runtime_bot is None:
+            raise Exception(f'Bot not found: {bot_uuid}')
+
+        # Check if adapter supports card updates
+        adapter = runtime_bot.adapter
+        if not hasattr(adapter, 'update_card_message'):
+            raise Exception(f'Bot adapter {adapter.__class__.__name__} does not support card message updates')
+
+        # Update card message via adapter
+        await adapter.update_card_message(message_id, content, is_final)
