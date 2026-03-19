@@ -388,6 +388,96 @@ class DingTalkClient:
                 failed=True,
             )
 
+    async def send_proactive_card(
+        self,
+        target_type: str,
+        target_id: str,
+        card_template_id: str,
+        content: str,
+    ) -> dict:
+        """Send proactive interactive card via DingTalk OpenAPI.
+
+        Args:
+            target_type: 'person' or 'group'
+            target_id: user_id or openConversationId
+            card_template_id: Card template ID
+            content: Initial card content
+
+        Returns:
+            dict with card_biz_id for updates
+        """
+        if not await self.check_access_token():
+            await self.get_access_token()
+
+        url = 'https://api.dingtalk.com/v1.0/im/interactiveCards/send'
+        headers = {
+            'x-acs-dingtalk-access-token': self.access_token,
+            'Content-Type': 'application/json',
+        }
+
+        card_biz_id = f'card_{target_id}_{int(time.time() * 1000)}'
+
+        body = {
+            'cardTemplateId': card_template_id,
+            'robotCode': self.robot_code,
+            'cardBizId': card_biz_id,
+            'cardData': json.dumps({'content': content, 'title': 'AI Thinking...'}),
+        }
+
+        if target_type == 'person':
+            body['singleChatReceiver'] = {'userId': target_id}
+        else:
+            body['openConversationId'] = target_id
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=body)
+            result = response.json()
+
+            if response.status_code != 200 or not result.get('success'):
+                error_msg = result.get('message', 'Unknown error')
+                raise Exception(f'Failed to send proactive card: {error_msg}')
+
+        return {'card_biz_id': card_biz_id}
+
+    async def update_proactive_card(
+        self,
+        card_biz_id: str,
+        content: str,
+        is_final: bool = False,
+    ) -> None:
+        """Update proactive card via streaming API.
+
+        Args:
+            card_biz_id: The card business ID from send_proactive_card
+            content: New content
+            is_final: Whether this is the final update
+        """
+        if not await self.check_access_token():
+            await self.get_access_token()
+
+        url = 'https://api.dingtalk.com/v1.0/im/interactiveCards/streamingUpdate'
+        headers = {
+            'x-acs-dingtalk-access-token': self.access_token,
+            'Content-Type': 'application/json',
+        }
+
+        body = {
+            'robotCode': self.robot_code,
+            'cardBizId': card_biz_id,
+            'cardData': json.dumps({'content': content, 'title': 'AI Response' if is_final else 'AI Thinking...'}),
+        }
+
+        if is_final:
+            body['finished'] = True
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=body)
+            if response.status_code != 200:
+                result = response.json()
+                error_msg = result.get('message', 'Unknown error')
+                if self.logger:
+                    await self.logger.error(f'Failed to update card: {error_msg}')
+
     async def start(self):
         """启动 WebSocket 连接，监听消息"""
         self._stopped = False
