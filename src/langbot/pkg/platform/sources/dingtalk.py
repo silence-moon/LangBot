@@ -294,9 +294,20 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
                 self._proactive_card_cache = {}
 
             self._proactive_card_cache[message_id] = {
-                'card_biz_id': result['card_biz_id'],
+                'out_track_id': result['out_track_id'],
                 'card_template_id': result['card_template_id'],
                 'last_content': content,
+            }
+
+            # DEBUG: 打印缓存状态
+            await self.logger.info(
+                f'[DingTalk Adapter] send_card_message: message_id={message_id}, out_track_id={result["out_track_id"]}, cache_size={len(self._proactive_card_cache)}'
+            )
+
+            return {
+                'message_id': message_id,
+                'card_id': message_id,
+                'lark_message_id': result['out_track_id'],
             }
 
             # DEBUG: 打印缓存状态
@@ -346,7 +357,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
 
         card_info = self._proactive_card_cache[message_id]
         await self.logger.info(
-            f'[DingTalk Adapter] update_card_message: found card_info, card_biz_id={card_info.get("card_biz_id")}'
+            f'[DingTalk Adapter] update_card_message: found card_info, out_track_id={card_info.get("out_track_id")}'
         )
 
         # Skip if content unchanged
@@ -358,7 +369,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
 
         try:
             await self.bot.update_proactive_card(
-                card_biz_id=card_info['card_biz_id'],
+                out_track_id=card_info['out_track_id'],
                 card_template_id=card_info['card_template_id'],
                 content=content,
                 is_final=is_final,

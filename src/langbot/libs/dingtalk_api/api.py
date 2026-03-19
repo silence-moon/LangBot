@@ -397,6 +397,8 @@ class DingTalkClient:
     ) -> dict:
         """Send proactive interactive card via DingTalk OpenAPI.
 
+        Uses SDK's card sending method to get proper outTrackId for streaming updates.
+
         Args:
             target_type: 'person' or 'group'
             target_id: user_id or openConversationId
@@ -404,91 +406,114 @@ class DingTalkClient:
             content: Initial card content
 
         Returns:
-            dict with card_biz_id for updates
+            dict with out_track_id for updates
         """
         if not await self.check_access_token():
             await self.get_access_token()
 
-        url = 'https://api.dingtalk.com/v1.0/im/interactiveCards/send'
+        # 生成卡片 ID（类似 SDK 的 gen_card_id 逻辑）
+        import hashlib
+        import uuid
+
+        factor = f'{target_type}_{target_id}_{str(uuid.uuid1())}'
+        card_instance_id = hashlib.sha256(factor.encode('utf-8')).hexdigest()
+
         headers = {
             'x-acs-dingtalk-access-token': self.access_token,
             'Content-Type': 'application/json',
         }
 
-        # 不再预生成 card_biz_id，改为使用钉钉返回的真实 ID
+        card_data = {'content': content, 'title': 'AI Thinking...'}
+
         body = {
             'cardTemplateId': card_template_id,
-            'robotCode': self.robot_code,
-            'cardData': json.dumps({'content': content, 'title': 'AI Thinking...'}),
+            'outTrackId': card_instance_id,
+            'cardData': {'cardParamMap': card_data},
+            'callbackType': 'STREAM',
+            'imGroupOpenSpaceModel': {'supportForward': True},
+            'imRobotOpenSpaceModel': {'supportForward': True},
         }
 
         if target_type == 'person':
-            body['singleChatReceiver'] = {'userId': target_id}
+            # 单聊
+            body['openSpaceId'] = f'dtv1.card//IM_ROBOT.{target_id}'
+            body['imRobotOpenDeliverModel'] = {'spaceType': 'IM_ROBOT'}
         else:
-            body['openConversationId'] = target_id
+            # 群聊
+            body['openSpaceId'] = f'dtv1.card//IM_GROUP.{target_id}'
+            body['imGroupOpenDeliverModel'] = {
+                'robotCode': self.robot_code,
+            }
 
+        # 发送卡片
+        url = 'https://api.dingtalk.com/v1.0/card/instances/createAndDeliver'
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json=body)
-            result = response.json()
 
             # DEBUG: 打印钉钉响应
             if self.logger:
                 await self.logger.info(
-                    f'[DingTalk] send_proactive_card response: status={response.status_code}, result={result}'
+                    f'[DingTalk] send_proactive_card response: status={response.status_code}, body={response.text}'
                 )
 
-            if response.status_code != 200 or not result.get('success'):
+            if response.status_code != 200:
+                result = response.json()
                 error_msg = result.get('message', 'Unknown error')
                 raise Exception(f'Failed to send proactive card: {error_msg}')
 
-            # 使用钉钉返回的真实 cardBizId
-            card_biz_id = result.get('cardBizId', '')
-            if self.logger:
-                await self.logger.info(f'[DingTalk] send_proactive_card: card_biz_id={card_biz_id}')
+        if self.logger:
+            await self.logger.info(f'[DingTalk] send_proactive_card: card_instance_id={card_instance_id}')
 
-        return {'card_biz_id': card_biz_id, 'card_template_id': card_template_id}
+        return {'out_track_id': card_instance_id, 'card_template_id': card_template_id}
 
     async def update_proactive_card(
         self,
-        card_biz_id: str,
+        out_track_id: str,
         card_template_id: str,
         content: str,
         is_final: bool = False,
     ) -> None:
         """Update proactive card via streaming API.
 
+        Uses SDK's streaming update method with outTrackId.
+
         Args:
-            card_biz_id: The card business ID from send_proactive_card
+            out_track_id: The card instance ID from send_proactive_card (outTrackId)
+            card_template_id: Card template ID (unused but kept for compatibility)
             content: New content
             is_final: Whether this is the final update
         """
         if not await self.check_access_token():
             await self.get_access_token()
 
-        url = 'https://api.dingtalk.com/v1.0/im/interactiveCards/streamingUpdate'
+        # 使用 SDK 的流式更新 API
+        import uuid
+
         headers = {
             'x-acs-dingtalk-access-token': self.access_token,
             'Content-Type': 'application/json',
         }
 
         body = {
-            'cardTemplateId': card_template_id,
-            'robotCode': self.robot_code,
-            'cardBizId': card_biz_id,
-            'cardData': json.dumps({'content': content, 'title': 'AI Response' if is_final else 'AI Thinking...'}),
+            'outTrackId': out_track_id,
+            'guid': str(uuid.uuid1()),
+            'key': 'content',
+            'content': content,
+            'isFull': True,  # 每次更新都替换全部内容
+            'isFinalize': is_final,
+            'isError': False,
         }
-
-        if is_final:
-            body['finished'] = True
 
         # DEBUG: 打印更新请求
         if self.logger:
             await self.logger.info(
-                f'[DingTalk] update_proactive_card: card_biz_id={card_biz_id}, card_template_id={card_template_id}, content={content[:50] if len(content) > 50 else content}..., is_final={is_final}'
+                f'[DingTalk] update_proactive_card: out_track_id={out_track_id}, content={content[:50] if len(content) > 50 else content}..., is_final={is_final}'
             )
 
+        # 使用 SDK 的流式更新端点
+        url = 'https://api.dingtalk.com/v1.0/card/streaming'
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=body)
+            response = await client.put(url, headers=headers, json=body)
 
             # DEBUG: 打印钉钉响应
             if self.logger:
