@@ -77,7 +77,7 @@ class DingTalkMessageConverter(abstract_platform_adapter.AbstractMessageConverte
             if event.picture:
                 yiri_msg_list.append(platform_message.Image(base64=event.picture))
 
-            # 处理其他类型消息（文件、音频等）
+        # 处理其他类型消息（文件、音频等）
         if event.file:
             yiri_msg_list.append(platform_message.File(url=event.file, name=event.name))
         if event.audio:
@@ -309,17 +309,6 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
                 'card_id': message_id,
                 'lark_message_id': result['out_track_id'],
             }
-
-            # DEBUG: 打印缓存状态
-            await self.logger.info(
-                f'[DingTalk Adapter] send_card_message: message_id={message_id}, card_biz_id={result["card_biz_id"]}, cache_size={len(self._proactive_card_cache)}'
-            )
-
-            return {
-                'message_id': message_id,
-                'card_id': message_id,
-                'lark_message_id': result['card_biz_id'],
-            }
         except Exception as e:
             await self.logger.error(f'Failed to send proactive card: {e}')
             # Fallback to markdown
@@ -377,6 +366,7 @@ class DingTalkAdapter(abstract_platform_adapter.AbstractMessagePlatformAdapter):
             await self.logger.info(f'[DingTalk Adapter] update_card_message: update_proactive_card called successfully')
         except Exception as e:
             await self.logger.error(f'Failed to update card: {e}')
+            raise
 
         if is_final:
             del self._proactive_card_cache[message_id]

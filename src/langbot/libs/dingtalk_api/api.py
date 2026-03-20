@@ -502,8 +502,8 @@ class DingTalkClient:
             )
 
         # Step 1: 先更新 flowStatus 状态
-        # INPUTING(2) 用于流式更新中, FINISHED(3) 用于完成
-        flow_status = 3 if is_final else 2  # 3=FINISHED, 2=INPUTING
+        # AI卡片状态: 1=PROCESSING, 2=INPUTING, 3=EXECUTING, 4=FINISHED, 5=FAILED
+        flow_status = 4 if is_final else 2  # 4=FINISHED, 2=INPUTING
 
         status_body = {
             'outTrackId': out_track_id,
@@ -544,11 +544,12 @@ class DingTalkClient:
                     f'[DingTalk] update_proactive_card streaming: status={streaming_response.status_code}, body={streaming_response.text}'
                 )
 
-            if streaming_response.status_code != 200:
-                result = streaming_response.json()
-                error_msg = result.get('message', 'Unknown error')
-                if self.logger:
-                    await self.logger.error(f'Failed to update card: {error_msg}')
+        if streaming_response.status_code != 200:
+            result = streaming_response.json()
+            error_msg = result.get('message', 'Unknown error')
+            if self.logger:
+                await self.logger.error(f'Failed to update card: {error_msg}')
+            raise Exception(f'Failed to update card: {error_msg}')
 
     async def start(self):
         """启动 WebSocket 连接，监听消息"""
